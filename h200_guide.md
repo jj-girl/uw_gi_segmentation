@@ -15,7 +15,6 @@
 - `requirements.txt`
 - `pyproject.toml`
 - `h200_guide.md`
-- `fusion_2p5d_3d.md`
 
 不建议上传：
 
@@ -155,5 +154,3 @@ H200 显存较大，可以尝试：
 - `image_size=416`
 - `UNet++ EfficientNet-B5`
 - `DeepLabV3+ EfficientNet-B4`
-- 3D SegResNet/DynUNet
-

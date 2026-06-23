@@ -9,7 +9,6 @@
 - `plan.md`
 - `train_sta.md`
 - `h200_guide.md`
-- `fusion_2p5d_3d.md`
 - `requirements.txt`
 - `pyproject.toml`
 
@@ -60,15 +59,3 @@ python scripts/inspect_data.py \
 1. `configs/h200_stage1_2p5d_unetpp_b3_all.yaml`
 2. `configs/h200_stage2_2p5d_unetpp_b3_balanced.yaml`
 3. `configs/h200_stage3_2p5d_unetpp_b5_positive_refine.yaml`
-
-第一轮不要直接上 3D。先让 2.5D 主模型在全量数据上达到稳定验证 Dice，再决定是否加入 3D 分支融合。
-
-## 3D 分支依赖
-
-如果后续实现 `SegResNet/DynUNet`，服务器环境需要额外安装：
-
-```bash
-pip install monai
-```
-
-3D 分支建议作为第二阶段创新模块，而不是迁移后的第一件事。
