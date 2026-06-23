@@ -331,12 +331,11 @@ class UWGIDataset(Dataset):
         image = self._load_image_stack(row)
         label_rows = self.labels[self.labels["id"] == row.id]
         mask = decode_multiclass(label_rows, (int(row.height), int(row.width)), CLASSES)
-        if self.crop_mode != "none":
-            resized_masks = []
-            for channel in mask:
-                resized = cv2.resize(channel, (self.image_size, self.image_size), interpolation=cv2.INTER_NEAREST)
-                resized_masks.append(resized)
-            mask = np.stack(resized_masks, axis=0).astype(np.float32)
+        resized_masks = []
+        for channel in mask:
+            resized = cv2.resize(channel, (self.image_size, self.image_size), interpolation=cv2.INTER_NEAREST)
+            resized_masks.append(resized)
+        mask = np.stack(resized_masks, axis=0).astype(np.float32)
         image, mask = self._apply_crop(image, mask)
 
         resized_images = []
@@ -350,10 +349,10 @@ class UWGIDataset(Dataset):
             resized = cv2.resize(channel, (self.image_size, self.image_size), interpolation=cv2.INTER_NEAREST)
             resized_masks.append(resized)
         mask = np.stack(resized_masks, axis=0).astype(np.float32)
-        cls = (mask.reshape(mask.shape[0], -1).max(axis=1) > 0).astype(np.float32)
 
         if self.augment:
             image, mask = self._augment(image, mask)
+        cls = (mask.reshape(mask.shape[0], -1).max(axis=1) > 0).astype(np.float32)
 
         image_tensor = torch.from_numpy(image.astype(np.float32))
         mask_tensor = torch.from_numpy(mask.astype(np.float32))

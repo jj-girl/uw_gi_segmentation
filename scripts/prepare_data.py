@@ -1,5 +1,6 @@
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -11,10 +12,26 @@ import pandas as pd
 COMPETITION = "uw-madison-gi-tract-image-segmentation"
 
 
+def safe_extract_member(zf: zipfile.ZipFile, member: str | zipfile.ZipInfo, destination: Path) -> Path:
+    info = zf.getinfo(member) if isinstance(member, str) else member
+    destination = destination.resolve()
+    target = (destination / info.filename).resolve()
+    if os.path.commonpath([destination, target]) != str(destination):
+        raise ValueError(f"Unsafe zip member path: {info.filename}")
+    if info.is_dir():
+        target.mkdir(parents=True, exist_ok=True)
+        return target
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with zf.open(info) as src, target.open("wb") as dst:
+        shutil.copyfileobj(src, dst)
+    return target
+
+
 def extract_zip(zip_path: Path, destination: Path) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(zip_path) as zf:
-        zf.extractall(destination)
+        for info in zf.infolist():
+            safe_extract_member(zf, info, destination)
 
 
 def extract_sample_zip(zip_path: Path, destination: Path, sample_cases: int) -> None:
@@ -34,8 +51,7 @@ def extract_sample_zip(zip_path: Path, destination: Path, sample_cases: int) -> 
 
         sample_submission = next((name for name in names if name.endswith("sample_submission.csv")), None)
         if sample_submission:
-            zf.extract(sample_submission, destination)
-            extracted = destination / sample_submission
+            extracted = safe_extract_member(zf, sample_submission, destination)
             if extracted != destination / "sample_submission.csv":
                 extracted.replace(destination / "sample_submission.csv")
 
@@ -44,7 +60,7 @@ def extract_sample_zip(zip_path: Path, destination: Path, sample_cases: int) -> 
         for name in names:
             normalized = name.replace("\\", "/")
             if normalized.startswith(prefixes) and not normalized.endswith("/"):
-                zf.extract(name, destination)
+                safe_extract_member(zf, name, destination)
                 extracted_count += 1
 
         if extracted_count == 0:
