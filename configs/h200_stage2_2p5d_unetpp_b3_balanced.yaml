@@ -1,0 +1,50 @@
+seed: 42
+data:
+  root: data/raw/uw-madison-gi-tract-image-segmentation
+  train_csv: train.csv
+  image_size: 384
+  slice_window: 5
+  crop_mode: none
+  valid_fold: 0
+  num_folds: 5
+  num_workers: 8
+  sampling: balanced_positive_negative
+  limit_train_samples:
+  limit_valid_samples:
+  limit_strategy: none
+model:
+  name: smp_unetplusplus_efficientnet-b3
+  encoder_weights:
+  in_channels: 5
+  num_classes: 3
+  classification_head: true
+train:
+  epochs: 35
+  batch_size: 16
+  lr: 0.0001
+  min_lr: 0.000001
+  weight_decay: 0.00001
+  scheduler: cosine
+  gradient_accumulation_steps: 1
+  amp: true
+  device: auto
+  init_from_checkpoint: outputs/h200_stage1_2p5d_unetpp_b3_all_fold0/best.pt
+  init_from_ema: true
+  resume_from_checkpoint:
+  early_stopping_patience: 6
+  output_dir: outputs/h200_stage2_2p5d_unetpp_b3_balanced_fold0
+  ema:
+    enabled: true
+    decay: 0.999
+loss:
+  name: dice_focal
+  dice_weight: 0.6
+  focal_weight: 0.4
+  cls_weight: 0.2
+inference:
+  tta: true
+  batch_size: 16
+postprocess:
+  mask_thresholds: [0.45, 0.45, 0.45]
+  cls_thresholds: [0.45, 0.45, 0.45]
+  min_area: [24, 24, 24]

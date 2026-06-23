@@ -1,0 +1,89 @@
+seed: 42
+data:
+  root: data/raw/uw-madison-gi-tract-image-segmentation
+  train_csv: train.csv
+  image_size: 384
+  slice_window: 5
+  crop_mode: none
+  valid_fold: 1
+  num_folds: 5
+  num_workers: 8
+  sampling: organ_balanced
+  limit_train_samples: null
+  limit_valid_samples: null
+  limit_strategy: none
+  augmentation:
+    affine_prob: 0.65
+    rotate_limit: 8.0
+    scale_limit: 0.1
+    shift_limit: 0.05
+    distortion_prob: 0.25
+    distortion_magnitude: 4.0
+    gamma_prob: 0.35
+    gamma_limit:
+    - 0.8
+    - 1.25
+    noise_prob: 0.25
+    noise_std: 0.02
+    blur_prob: 0.1
+    blur_kernel: 3
+    z_dropout_prob: 0.2
+    z_dropout_max_channels: 2
+model:
+  name: smp_unetplusplus_efficientnet-b3
+  encoder_weights: imagenet
+  in_channels: 5
+  num_classes: 3
+  classification_head: true
+train:
+  epochs: 24
+  batch_size: 16
+  lr: 0.0002
+  min_lr: 1.0e-06
+  weight_decay: 1.0e-05
+  scheduler: cosine
+  gradient_accumulation_steps: 1
+  amp: true
+  device: auto
+  resume_from_checkpoint: null
+  early_stopping_patience: 7
+  output_dir: outputs/h200_stage1_strategy_c_organ_balanced_focal_tversky_fold1
+  ema:
+    enabled: true
+    decay: 0.999
+loss:
+  name: focal_tversky
+  tversky_weight: 1.0
+  tversky_alpha: 0.35
+  tversky_beta: 0.65
+  focal_tversky_gamma: 0.75
+  cls_weight: 0.2
+inference:
+  tta: true
+  batch_size: 16
+postprocess:
+  mask_thresholds:
+  - 0.25
+  - 0.25
+  - 0.25
+  cls_thresholds:
+  - 0.9
+  - 0.9
+  - 0.8
+  min_area:
+  - 48
+  - 192
+  - 192
+  z_min_run:
+  - 2
+  - 3
+  - 1
+  min_volume:
+  - 512
+  - 0
+  - 512
+  keep_largest_component:
+  - false
+  - false
+  - false
+  component_connectivity: 1

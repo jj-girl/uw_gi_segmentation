@@ -1,0 +1,9 @@
+[project]
+name = "uw-gi-segmentation"
+version = "0.1.0"
+description = "Modern PyTorch baseline for UW-Madison GI Tract Image Segmentation."
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 120
+
