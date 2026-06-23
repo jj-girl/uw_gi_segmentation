@@ -71,4 +71,3 @@ python -m src.uwgi.train --config configs/unet_baseline.yaml
 3. `smp_unetplusplus_efficientnet_b3`: stronger encoder and decoder, good second model.
 4. `smp_deeplabv3plus_resnet50`: atrous/spatial context baseline.
 5. `2.5D UNet`: use adjacent MRI slices as channels for sequence context.
-
