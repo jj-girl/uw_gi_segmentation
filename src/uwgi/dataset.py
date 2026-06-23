@@ -26,8 +26,8 @@ def parse_scan_filename(path: Path) -> tuple[int, int, float, float]:
     parts = path.stem.split("_")
     if len(parts) < 5:
         raise ValueError(f"Unexpected scan filename: {path.name}")
-    height = int(parts[-4])
-    width = int(parts[-3])
+    width = int(parts[-4])
+    height = int(parts[-3])
     spacing_h = float(parts[-2])
     spacing_w = float(parts[-1])
     return height, width, spacing_h, spacing_w

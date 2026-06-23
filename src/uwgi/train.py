@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, WeightedRandomSampler
 from tqdm import tqdm
 
-from .dataset import CLASSES, UWGIDataset, build_metadata
+from .dataset import CLASSES, UWGIDataset, build_metadata, parse_scan_filename
 from .losses import segmentation_loss
 from .metrics import dice_score
 from .models import build_model
@@ -131,6 +131,17 @@ def load_or_build_metadata(cfg: dict) -> pd.DataFrame:
     metadata_path = data_root / "metadata_folds.csv"
     if metadata_path.exists():
         meta = pd.read_csv(metadata_path)
+        stale_dimensions = False
+        if {"image_path", "height", "width"}.issubset(meta.columns):
+            for row in meta[["image_path", "height", "width"]].itertuples(index=False):
+                height, width, _, _ = parse_scan_filename(Path(row.image_path))
+                if int(row.height) != height or int(row.width) != width:
+                    stale_dimensions = True
+                    break
+        if stale_dimensions:
+            meta = build_metadata(data_root, cfg["data"]["train_csv"], cfg["data"]["num_folds"])
+            meta.to_csv(metadata_path, index=False)
+            return meta
         required_class_columns = {f"has_{name}" for name in CLASSES}
         if required_class_columns.issubset(meta.columns):
             return meta

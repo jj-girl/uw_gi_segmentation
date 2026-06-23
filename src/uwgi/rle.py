@@ -6,11 +6,11 @@ def rle_decode(rle: str | float | None, shape: tuple[int, int]) -> np.ndarray:
     height, width = shape
     mask = np.zeros(height * width, dtype=np.uint8)
     if rle is None or (isinstance(rle, float) and np.isnan(rle)):
-        return mask.reshape((height, width), order="F")
+        return mask.reshape((height, width), order="C")
 
     rle = str(rle).strip()
     if not rle:
-        return mask.reshape((height, width), order="F")
+        return mask.reshape((height, width), order="C")
 
     values = np.asarray(rle.split(), dtype=np.int64)
     starts = values[0::2] - 1
@@ -18,12 +18,12 @@ def rle_decode(rle: str | float | None, shape: tuple[int, int]) -> np.ndarray:
     ends = starts + lengths
     for start, end in zip(starts, ends):
         mask[start:end] = 1
-    return mask.reshape((height, width), order="F")
+    return mask.reshape((height, width), order="C")
 
 
 def rle_encode(mask: np.ndarray) -> str:
     """Encode a binary mask using Kaggle RLE format."""
-    pixels = np.asarray(mask, dtype=np.uint8).T.flatten()
+    pixels = np.asarray(mask, dtype=np.uint8).flatten()
     pixels = np.concatenate([[0], pixels, [0]])
     runs = np.where(pixels[1:] != pixels[:-1])[0] + 1
     runs[1::2] -= runs[0::2]
@@ -41,4 +41,3 @@ def decode_multiclass(
     for idx, cls in enumerate(classes):
         masks[idx] = rle_decode(by_class.get(cls), shape)
     return masks
-

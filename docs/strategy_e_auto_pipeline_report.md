@@ -1,5 +1,9 @@
 # Stage 1 Auto Pipeline Report
 
+> Invalidated on 2026-06-23: this report was generated before the RLE
+> decode and image-dimension mask fix. Do not use these metrics as valid
+> results. Use the new `outputs/maskfix_oof` report after retraining.
+
 Generated: 2026-06-23 01:51:41 UTC
 Revised: 2026-06-23, final selection set to `min_area + z-axis`.
 

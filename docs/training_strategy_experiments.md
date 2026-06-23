@@ -1,5 +1,10 @@
 # Training Strategy Experiments
 
+> Invalidated on 2026-06-23 for numeric conclusions: experiments listed here
+> were run before the RLE decode and image-dimension fix. The strategy taxonomy
+> is still useful, but the reported comparisons must be recomputed from
+> `h200_maskfix_*` runs.
+
 目标：在不覆盖当前 Stage 1 baseline 的前提下，逐轴测试训练策略是否更适合 UWGI 数据。
 
 ## 当前实验轴

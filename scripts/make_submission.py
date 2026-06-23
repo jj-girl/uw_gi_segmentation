@@ -169,7 +169,10 @@ def load_model(cfg: dict, checkpoint: Path, device: torch.device) -> torch.nn.Mo
         encoder_weights=None,
         classification_head=cfg["model"].get("classification_head", False),
     ).to(device)
-    ckpt = torch.load(checkpoint, map_location=device)
+    try:
+        ckpt = torch.load(checkpoint, map_location=device, weights_only=True)
+    except TypeError:
+        ckpt = torch.load(checkpoint, map_location=device)
     state = ckpt.get("ema_model") or ckpt["model"]
     model.load_state_dict(state)
     model.eval()
