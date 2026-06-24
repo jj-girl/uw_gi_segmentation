@@ -26,7 +26,7 @@ from src.uwgi.utils import get_device, load_yaml
 
 DATA_ROOT = ROOT / "data/raw/uw-madison-gi-tract-image-segmentation"
 DEFAULT_PRESETS = {
-    "Maskfix Strategy E 5-fold": {
+    "Final Strategy E 5-fold": {
         "glob": "configs/h200_maskfix_stage1_strategy_e_folds/h200_maskfix_stage1_strategy_e_fold*.yaml",
         "checkpoint": "best_postprocess.pt",
         "report": "docs/maskfix_strategy_e_auto_pipeline_report.md",
@@ -359,7 +359,7 @@ def select_case_controls(meta: pd.DataFrame) -> pd.Series:
 def render_header(row: pd.Series, selected_configs: list[Path], checkpoint_name: str) -> None:
     st.title("UWGI Medical Image Segmentation Workbench")
     st.caption("2.5D MRI segmentation for large bowel, small bowel, and stomach.")
-    st.success("Using maskfix checkpoints trained with corrected RLE decoding and image dimensions.")
+    st.success("Using the final 5-fold model bundle with OOF-tuned postprocess settings.")
     chips = [
         f"case {row.case}",
         f"day {row.day}",

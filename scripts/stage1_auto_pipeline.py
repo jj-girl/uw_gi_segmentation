@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -99,6 +100,50 @@ def metric_summary(result: dict) -> dict:
         "mean_dice_positive_slices": float(summary["mean_dice_positive_slices"]),
         "mean_empty_slice_false_positive_rate": float(summary["mean_empty_slice_false_positive_rate"]),
     }
+
+
+def fallback_classes_from_threshold(threshold: dict) -> dict:
+    classes = {}
+    for name in CLASSES:
+        item = threshold[name]
+        classes[name] = {
+            "class": name,
+            "mask_threshold": float(item["mask_threshold"]),
+            "cls_threshold": float(item["cls_threshold"]),
+            "min_area": 0,
+            "z_min_run": 1,
+            "component_mode": "fallback_threshold_only",
+            "min_volume": 0,
+            "keep_largest": False,
+            "connectivity": 1,
+            "metrics": {},
+            "top_candidates": [],
+        }
+    return classes
+
+
+def write_fallback_search_result(
+    path: Path,
+    threshold_path: Path,
+    eval_path: Path,
+    reason: str,
+) -> None:
+    threshold = load_json(threshold_path)
+    final_eval = load_json(eval_path)
+    classes = fallback_classes_from_threshold(threshold)
+    for name in CLASSES:
+        classes[name]["metrics"] = final_eval["summary"]["classes"][name]
+        classes[name]["top_candidates"] = [dict(classes[name])]
+    result = {
+        "summary": final_eval["summary"],
+        "classes": classes,
+        "folds": final_eval.get("folds", []),
+        "num_folds": final_eval.get("num_folds", threshold.get("num_folds")),
+        "source_thresholds": threshold,
+        "search_space": {"fallback": reason},
+    }
+    ensure_dir(path.parent)
+    path.write_text(json.dumps(result, indent=2), encoding="utf-8")
 
 
 def format_float(value: float) -> str:
@@ -269,69 +314,89 @@ def main() -> None:
         force=args.force,
         dry_run=args.dry_run,
     )
-    step_status["minarea_z_search"] = maybe_run(
-        minarea_z_path,
-        [
-            py,
-            "-u",
-            "scripts/oof_postprocess_search.py",
-            "--fold-config-glob",
-            args.fold_config_glob,
-            "--checkpoint-name",
-            args.checkpoint_name,
-            "--thresholds-json",
-            str(threshold_path),
-            "--out",
-            str(minarea_z_path),
-            "--min-area-grid",
-            "0,8,16,24,48,96,192",
-            "--z-min-run-grid",
-            "1,2,3",
-            "--min-volume-grid",
-            "0",
-            "--connectivity",
-            "1",
-        ],
-        logs_dir / "minarea_z_search.log",
-        force=args.force,
-        dry_run=args.dry_run,
-    )
-    step_status["component_search"] = maybe_run(
-        component_path,
-        [
-            py,
-            "-u",
-            "scripts/oof_component_search_parallel.py",
-            "--fold-config-glob",
-            args.fold_config_glob,
-            "--checkpoint-name",
-            args.checkpoint_name,
-            "--thresholds-json",
-            str(threshold_path),
-            "--out",
-            str(component_path),
-            "--work-dir",
-            args.work_dir,
-            "--min-area-grid",
-            "48,192",
-            "--z-min-run-grid",
-            "1,2,3",
-            "--min-volume-grid",
-            "0,64,128,256,512",
-            "--keep-largest",
-            "--connectivity",
-            "1",
-            "--gpus",
-            args.gpus,
-            "--max-workers",
-            str(args.max_workers),
-        ],
-        logs_dir / "component_search.log",
-        force=args.force,
-        dry_run=args.dry_run,
-    )
+    fallback_reason = ""
+    if os.environ.get("OOF_FALLBACK_THRESHOLD_ONLY") == "1":
+        fallback_reason = "threshold_only_requested"
+        step_status["minarea_z_search"] = "skipped; threshold-only fallback requested"
+    try:
+        if fallback_reason:
+            raise RuntimeError(fallback_reason)
+        step_status["minarea_z_search"] = maybe_run(
+            minarea_z_path,
+            [
+                py,
+                "-u",
+                "scripts/oof_postprocess_search.py",
+                "--fold-config-glob",
+                args.fold_config_glob,
+                "--checkpoint-name",
+                args.checkpoint_name,
+                "--thresholds-json",
+                str(threshold_path),
+                "--out",
+                str(minarea_z_path),
+                "--min-area-grid",
+                "0,8,16,24,48,96,192",
+                "--z-min-run-grid",
+                "1,2,3",
+                "--min-volume-grid",
+                "0",
+                "--connectivity",
+                "1",
+            ],
+            logs_dir / "minarea_z_search.log",
+            force=args.force,
+            dry_run=args.dry_run,
+        )
+    except subprocess.CalledProcessError as exc:
+        fallback_reason = f"minarea_z_search_failed_exit_{exc.returncode}"
+        step_status["minarea_z_search"] = f"failed; {fallback_reason}; using threshold-only fallback"
+    except RuntimeError as exc:
+        if not fallback_reason:
+            raise
 
-    component_result = load_json(component_path)
+    if fallback_reason:
+        step_status["component_search"] = "skipped; using threshold-only fallback"
+        component_result = {
+            "classes": fallback_classes_from_threshold(load_json(threshold_path)),
+        }
+    else:
+        step_status["component_search"] = maybe_run(
+            component_path,
+            [
+                py,
+                "-u",
+                "scripts/oof_component_search_parallel.py",
+                "--fold-config-glob",
+                args.fold_config_glob,
+                "--checkpoint-name",
+                args.checkpoint_name,
+                "--thresholds-json",
+                str(threshold_path),
+                "--out",
+                str(component_path),
+                "--work-dir",
+                args.work_dir,
+                "--min-area-grid",
+                "48,192",
+                "--z-min-run-grid",
+                "1,2,3",
+                "--min-volume-grid",
+                "0,64,128,256,512",
+                "--keep-largest",
+                "--connectivity",
+                "1",
+                "--gpus",
+                args.gpus,
+                "--max-workers",
+                str(args.max_workers),
+            ],
+            logs_dir / "component_search.log",
+            force=args.force,
+            dry_run=args.dry_run,
+        )
+        component_result = load_json(component_path)
+
     updated_configs = 0
     for path in [Path(args.main_config), *config_paths]:
         if not args.dry_run:
@@ -357,6 +422,10 @@ def main() -> None:
         force=args.force,
         dry_run=args.dry_run,
     )
+
+    if fallback_reason and not args.dry_run:
+        write_fallback_search_result(minarea_z_path, threshold_path, eval_path, fallback_reason)
+        write_fallback_search_result(component_path, threshold_path, eval_path, fallback_reason)
 
     report = build_report(
         checkpoint_rows=checkpoint_rows,
