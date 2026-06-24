@@ -3,14 +3,23 @@
 PyTorch project for multi-class abdominal MRI segmentation on the Kaggle
 UW-Madison GI Tract Image Segmentation dataset.
 
-## Current Valid Result
+## Current System
 
-The current valid model family is the mask-coordinate-fixed 5-fold Strategy E
-run:
+The project is now organized around two kept model lines:
+
+1. `maskfix Strategy E`: current validated main 5-fold model.
+2. `UNet++ EfficientNet-B5`: accepted second model line, currently expanding to 5-fold.
+
+See `docs/current_system_state.md` for the cleanup decision and active paths.
+
+## Current Valid Main Result
+
+The current validated main model family is the mask-coordinate-fixed 5-fold
+Strategy E run:
 
 - Configs: `configs/h200_maskfix_stage1_strategy_e_folds/h200_maskfix_stage1_strategy_e_fold*.yaml`
 - Checkpoints: `outputs/h200_maskfix_stage1_strategy_e_fold*/best_postprocess.pt`
-- OOF report: `docs/maskfix_strategy_e_auto_pipeline_report.md`
+- OOF report: `outputs/maskfix_oof/maskfix_strategy_e_auto_report.md`
 
 Final OOF postprocessed result:
 
@@ -30,10 +39,10 @@ keep_largest_component: [false, false, true]
 component_connectivity: 1
 ```
 
-Older pre-maskfix metrics, checkpoints, submissions, and OOF artifacts are
-invalid because masks were decoded with the wrong coordinate convention. Old
-result files were moved to `outputs/invalid_pre_maskfix_artifacts/` for audit
-only.
+Older pre-maskfix metrics, checkpoints, submissions, and unsuccessful
+candidate-model artifacts were removed during cleanup. Do not use old
+`stage1_*`, `baseline`, `DeepLabV3+`, `small_bowel_aware`, or `nnunet_route`
+paths as active project state.
 
 ## Important Mask Fix
 
@@ -51,7 +60,7 @@ Because of this, all models trained before the fix must be treated as invalid.
 configs/      training configs
 data/         Kaggle data and generated metadata
 docs/         pipeline and UI documentation
-outputs/      checkpoints, OOF reports, submissions, archived invalid outputs
+outputs/      kept checkpoints, OOF reports, submissions, active B5 monitor logs
 scripts/      data, training, OOF, submission, and monitoring utilities
 src/uwgi/     package source
 ```
@@ -109,6 +118,29 @@ The completed 5-fold run used:
 - Dice + BCE + classification BCE
 - EMA
 - postprocess-aware checkpoint selection
+
+## Train Second Model
+
+The accepted second model is `UNet++ EfficientNet-B5`. Fold0 is complete and
+fold1-4 are managed by:
+
+```bash
+GPU_ID=0 MAX_RUNNING=1 CHECK_SECONDS=180 \
+  python -u scripts/monitor_unetpp_b5_5fold.py
+```
+
+Monitor state:
+
+```text
+outputs/h200_next_unetpp_b5_5fold/status.json
+outputs/h200_next_unetpp_b5_5fold/monitor.log
+```
+
+Fold configs:
+
+```text
+configs/h200_next_unetpp_b5_folds/h200_next_unetpp_b5_fold*.yaml
+```
 
 ## OOF And Postprocess
 
