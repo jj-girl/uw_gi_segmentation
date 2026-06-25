@@ -26,7 +26,29 @@ from src.uwgi.utils import get_device, load_yaml
 
 DATA_ROOT = ROOT / "data/raw/uw-madison-gi-tract-image-segmentation"
 DEFAULT_PRESETS = {
-    "Final Strategy E 5-fold": {
+    "Dual-model ensemble": {
+        "kind": "ensemble",
+        "model_a_name": "Strategy E",
+        "model_a_glob": "configs/h200_maskfix_stage1_strategy_e_folds/h200_maskfix_stage1_strategy_e_fold*.yaml",
+        "model_a_checkpoint": "best_postprocess.pt",
+        "model_a_weight": 0.3,
+        "model_b_name": "B5",
+        "model_b_glob": "configs/h200_next_unetpp_b5_folds/h200_next_unetpp_b5_fold*.yaml",
+        "model_b_checkpoint": "best_postprocess.pt",
+        "model_b_weight": 0.7,
+        "postprocess_source": "b",
+        "report": "docs/final_solution_report.md",
+        "oof_json": "outputs/ensemble_strategy_e_b5/strategy_e_b5_weight_search.json",
+    },
+    "B5 primary 5-fold": {
+        "kind": "single",
+        "glob": "configs/h200_next_unetpp_b5_folds/h200_next_unetpp_b5_fold*.yaml",
+        "checkpoint": "best_postprocess.pt",
+        "report": "outputs/h200_next_unetpp_b5_oof/h200_next_unetpp_b5_auto_report.md",
+        "oof_json": "outputs/h200_next_unetpp_b5_oof/h200_stage1_eval_config_component_postprocess.json",
+    },
+    "Strategy E auxiliary 5-fold": {
+        "kind": "single",
         "glob": "configs/h200_maskfix_stage1_strategy_e_folds/h200_maskfix_stage1_strategy_e_fold*.yaml",
         "checkpoint": "best_postprocess.pt",
         "report": "docs/maskfix_strategy_e_auto_pipeline_report.md",
@@ -138,18 +160,31 @@ def matched_configs(pattern: str) -> list[Path]:
     return sorted(Path(path) for path in glob.glob(pattern))
 
 
+def configs_by_fold(pattern: str) -> dict[int, Path]:
+    result = {}
+    for path in matched_configs(pattern):
+        cfg = load_yaml(path)
+        result[int(cfg["data"]["valid_fold"])] = path
+    return result
+
+
 def checkpoint_path(config_path: Path, checkpoint_name: str) -> Path:
     cfg = load_yaml(config_path)
     return Path(cfg["train"]["output_dir"]) / checkpoint_name
 
 
-def summarize_checkpoint_status(config_paths: list[Path], checkpoint_name: str) -> pd.DataFrame:
+def summarize_checkpoint_status(
+    config_paths: list[Path],
+    checkpoint_name: str,
+    model_name: str = "model",
+) -> pd.DataFrame:
     rows = []
     for path in config_paths:
         cfg = load_yaml(path)
         checkpoint = checkpoint_path(path, checkpoint_name)
         rows.append(
             {
+                "model": model_name,
                 "fold": int(cfg["data"]["valid_fold"]),
                 "config": str(path),
                 "checkpoint": str(checkpoint),
@@ -293,6 +328,54 @@ def predict_selected_slice(
     return probs, cls_probs, first_cfg
 
 
+@torch.no_grad()
+def predict_weighted_ensemble_slice(
+    model_a_configs: list[Path],
+    model_b_configs: list[Path],
+    model_a_checkpoint: str,
+    model_b_checkpoint: str,
+    weight_a: float,
+    weight_b: float,
+    postprocess_source: str,
+    row: pd.Series,
+    device_name: str,
+    use_tta: bool,
+) -> tuple[np.ndarray, np.ndarray | None, dict]:
+    total = weight_a + weight_b
+    if total <= 0:
+        raise ValueError("Ensemble weights must sum to a positive value.")
+    weight_a = weight_a / total
+    weight_b = weight_b / total
+
+    probs_a, cls_a, cfg_a = predict_selected_slice(
+        model_a_configs,
+        checkpoint_name=model_a_checkpoint,
+        row=row,
+        device_name=device_name,
+        use_tta=use_tta,
+    )
+    probs_b, cls_b, cfg_b = predict_selected_slice(
+        model_b_configs,
+        checkpoint_name=model_b_checkpoint,
+        row=row,
+        device_name=device_name,
+        use_tta=use_tta,
+    )
+    if probs_a.shape != probs_b.shape:
+        raise ValueError(f"Probability shape mismatch: {probs_a.shape} vs {probs_b.shape}")
+    probs = weight_a * probs_a + weight_b * probs_b
+
+    if cls_a is None or cls_b is None:
+        cls_probs = None
+    else:
+        if cls_a.shape != cls_b.shape:
+            raise ValueError(f"Classification probability shape mismatch: {cls_a.shape} vs {cls_b.shape}")
+        cls_probs = weight_a * cls_a + weight_b * cls_b
+
+    cfg = cfg_b if postprocess_source == "b" else cfg_a
+    return probs, cls_probs, cfg
+
+
 def build_postprocess_controls(default_cfg: dict) -> dict:
     post_cfg = default_cfg.get("postprocess", {})
     defaults = {
@@ -356,16 +439,17 @@ def select_case_controls(meta: pd.DataFrame) -> pd.Series:
     return row
 
 
-def render_header(row: pd.Series, selected_configs: list[Path], checkpoint_name: str) -> None:
-    st.title("UWGI Medical Image Segmentation Workbench")
+def render_header(row: pd.Series, bundle_name: str, fold_count: int, checkpoint_label: str) -> None:
+    st.title("UWGI Dual-Model Segmentation Workbench")
     st.caption("2.5D MRI segmentation for large bowel, small bowel, and stomach.")
-    st.success("Using the final 5-fold model bundle with OOF-tuned postprocess settings.")
+    st.success("Using the selected model bundle with OOF-tuned postprocess settings.")
     chips = [
+        bundle_name,
         f"case {row.case}",
         f"day {row.day}",
         f"slice {int(row.slice):04d}",
-        f"{len(selected_configs)} fold model",
-        checkpoint_name,
+        f"{fold_count} fold(s)",
+        checkpoint_label,
     ]
     st.markdown("".join(f"<span class='uwgi-chip'>{chip}</span>" for chip in chips), unsafe_allow_html=True)
 
@@ -466,12 +550,21 @@ def render_oof_panel(preset: dict) -> None:
         return
     st.markdown("<div class='uwgi-section'></div>", unsafe_allow_html=True)
     st.subheader("OOF Validation")
-    summary = result.get("summary", {}).get("summary", result.get("summary", {}))
+    if preset.get("kind") == "ensemble" and "best" in result:
+        best = result["best"]
+        summary = best.get("summary", {}).get("summary", {})
+        classes = best.get("summary", {}).get("classes", {})
+        st.caption(
+            f"Best weights: Strategy E {best.get('weight_a', 0):.3f}, "
+            f"B5 {best.get('weight_b', 0):.3f}"
+        )
+    else:
+        summary = result.get("summary", {}).get("summary", result.get("summary", {}))
+        classes = result.get("classes") or result.get("summary", {}).get("classes", {})
     cols = st.columns(3)
     cols[0].metric("Mean Dice", f"{summary.get('mean_dice_all_slices', 0):.4f}")
     cols[1].metric("Positive Dice", f"{summary.get('mean_dice_positive_slices', 0):.4f}")
     cols[2].metric("Empty FP Rate", f"{summary.get('mean_empty_slice_false_positive_rate', 0):.4f}")
-    classes = result.get("classes") or result.get("summary", {}).get("classes", {})
     if classes:
         table = []
         for name in CLASSES:
@@ -494,39 +587,99 @@ def main() -> None:
 
     preset_name = st.sidebar.selectbox("Model bundle", list(DEFAULT_PRESETS), index=0)
     preset = DEFAULT_PRESETS[preset_name]
-    config_paths = matched_configs(preset["glob"])
-    if not config_paths:
-        st.error(f"No configs matched: {preset['glob']}")
-        st.stop()
 
-    checkpoint_name = st.sidebar.text_input("Checkpoint", preset["checkpoint"])
-    checkpoint_status = summarize_checkpoint_status(config_paths, checkpoint_name)
-    ready_configs = [Path(row.config) for row in checkpoint_status.itertuples(index=False) if row.ready]
-    if not ready_configs:
-        st.error("No ready checkpoints were found for this bundle.")
-        st.dataframe(checkpoint_status, hide_index=True, width="stretch")
-        st.stop()
+    if preset.get("kind") == "ensemble":
+        model_a_by_fold = configs_by_fold(preset["model_a_glob"])
+        model_b_by_fold = configs_by_fold(preset["model_b_glob"])
+        if not model_a_by_fold:
+            st.error(f"No configs matched: {preset['model_a_glob']}")
+            st.stop()
+        if not model_b_by_fold:
+            st.error(f"No configs matched: {preset['model_b_glob']}")
+            st.stop()
 
-    fold_options = [int(load_yaml(path)["data"]["valid_fold"]) for path in ready_configs]
-    default_folds = fold_options if len(fold_options) <= 2 else [fold_options[0]]
-    selected_folds = st.sidebar.multiselect("Folds for inference", fold_options, default=default_folds)
-    selected_configs = [
-        path
-        for path in ready_configs
-        if int(load_yaml(path)["data"]["valid_fold"]) in set(selected_folds)
-    ]
-    if not selected_configs:
-        st.warning("Select at least one fold.")
-        st.stop()
+        model_a_checkpoint = st.sidebar.text_input(
+            f"{preset['model_a_name']} checkpoint",
+            preset["model_a_checkpoint"],
+        )
+        model_b_checkpoint = st.sidebar.text_input(
+            f"{preset['model_b_name']} checkpoint",
+            preset["model_b_checkpoint"],
+        )
+        model_a_status = summarize_checkpoint_status(
+            list(model_a_by_fold.values()),
+            model_a_checkpoint,
+            preset["model_a_name"],
+        )
+        model_b_status = summarize_checkpoint_status(
+            list(model_b_by_fold.values()),
+            model_b_checkpoint,
+            preset["model_b_name"],
+        )
+        checkpoint_status = pd.concat([model_a_status, model_b_status], ignore_index=True)
+
+        paired_folds = sorted(set(model_a_by_fold) & set(model_b_by_fold))
+        ready_folds = [
+            fold
+            for fold in paired_folds
+            if checkpoint_path(model_a_by_fold[fold], model_a_checkpoint).exists()
+            and checkpoint_path(model_b_by_fold[fold], model_b_checkpoint).exists()
+        ]
+        if not ready_folds:
+            st.error("No paired ready checkpoints were found for this dual-model bundle.")
+            st.dataframe(checkpoint_status, hide_index=True, width="stretch")
+            st.stop()
+
+        default_folds = ready_folds if len(ready_folds) <= 2 else [ready_folds[0]]
+        selected_folds = st.sidebar.multiselect("Paired folds for inference", ready_folds, default=default_folds)
+        if not selected_folds:
+            st.warning("Select at least one paired fold.")
+            st.stop()
+        selected_model_a_configs = [model_a_by_fold[fold] for fold in selected_folds]
+        selected_model_b_configs = [model_b_by_fold[fold] for fold in selected_folds]
+        postprocess_cfg_path = selected_model_b_configs[0] if preset.get("postprocess_source") == "b" else selected_model_a_configs[0]
+        default_cfg = load_yaml(postprocess_cfg_path)
+        checkpoint_label = (
+            f"{preset['model_a_name']} {model_a_checkpoint} + "
+            f"{preset['model_b_name']} {model_b_checkpoint}"
+        )
+        fold_count = len(selected_folds)
+    else:
+        config_paths = matched_configs(preset["glob"])
+        if not config_paths:
+            st.error(f"No configs matched: {preset['glob']}")
+            st.stop()
+
+        checkpoint_name = st.sidebar.text_input("Checkpoint", preset["checkpoint"])
+        checkpoint_status = summarize_checkpoint_status(config_paths, checkpoint_name, preset_name)
+        ready_configs = [Path(row.config) for row in checkpoint_status.itertuples(index=False) if row.ready]
+        if not ready_configs:
+            st.error("No ready checkpoints were found for this bundle.")
+            st.dataframe(checkpoint_status, hide_index=True, width="stretch")
+            st.stop()
+
+        fold_options = [int(load_yaml(path)["data"]["valid_fold"]) for path in ready_configs]
+        default_folds = fold_options if len(fold_options) <= 2 else [fold_options[0]]
+        selected_folds = st.sidebar.multiselect("Folds for inference", fold_options, default=default_folds)
+        selected_configs = [
+            path
+            for path in ready_configs
+            if int(load_yaml(path)["data"]["valid_fold"]) in set(selected_folds)
+        ]
+        if not selected_configs:
+            st.warning("Select at least one fold.")
+            st.stop()
+        default_cfg = load_yaml(selected_configs[0])
+        checkpoint_label = checkpoint_name
+        fold_count = len(selected_configs)
 
     device_choice = st.sidebar.selectbox("Device", ["auto", "cuda", "cpu"], index=0)
-    use_tta = st.sidebar.toggle("Horizontal flip TTA", value=bool(load_yaml(selected_configs[0]).get("inference", {}).get("tta", True)))
+    use_tta = st.sidebar.toggle("Horizontal flip TTA", value=bool(default_cfg.get("inference", {}).get("tta", True)))
     alpha = st.sidebar.slider("Overlay opacity", 0.2, 0.8, 0.48, 0.02)
     row = select_case_controls(meta)
-    default_cfg = load_yaml(selected_configs[0])
     post_cfg = build_postprocess_controls(default_cfg)
 
-    render_header(row, selected_configs, checkpoint_name)
+    render_header(row, preset_name, fold_count, checkpoint_label)
     status_col, action_col = st.columns([0.72, 0.28])
     with status_col:
         st.dataframe(checkpoint_status, hide_index=True, width="stretch")
@@ -540,17 +693,32 @@ def main() -> None:
 
     if run:
         with st.spinner("Running model inference..."):
-            probs, cls_probs, cfg = predict_selected_slice(
-                selected_configs,
-                checkpoint_name=checkpoint_name,
-                row=row,
-                device_name=device_choice,
-                use_tta=use_tta,
-            )
+            if preset.get("kind") == "ensemble":
+                probs, cls_probs, cfg = predict_weighted_ensemble_slice(
+                    selected_model_a_configs,
+                    selected_model_b_configs,
+                    model_a_checkpoint=model_a_checkpoint,
+                    model_b_checkpoint=model_b_checkpoint,
+                    weight_a=float(preset["model_a_weight"]),
+                    weight_b=float(preset["model_b_weight"]),
+                    postprocess_source=str(preset["postprocess_source"]),
+                    row=row,
+                    device_name=device_choice,
+                    use_tta=use_tta,
+                )
+            else:
+                probs, cls_probs, cfg = predict_selected_slice(
+                    selected_configs,
+                    checkpoint_name=checkpoint_name,
+                    row=row,
+                    device_name=device_choice,
+                    use_tta=use_tta,
+                )
             image_size = int(cfg["data"]["image_size"])
             base = load_center_image(row, image_size)
             truth_mask = load_truth_mask(row, labels, image_size)
             st.session_state["last_prediction"] = {
+                "preset_name": preset_name,
                 "row_id": row.id,
                 "base": base,
                 "probs": probs,
@@ -561,6 +729,8 @@ def main() -> None:
     prediction = st.session_state["last_prediction"]
     if prediction["row_id"] != row.id:
         st.warning("The displayed prediction belongs to the previous selected slice. Run segmentation again for the current slice.")
+    if prediction.get("preset_name") != preset_name:
+        st.warning("The displayed prediction belongs to a different model bundle. Run segmentation again for the selected bundle.")
 
     pred_mask = postprocess_slice(
         prediction["probs"],

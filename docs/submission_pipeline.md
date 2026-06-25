@@ -1,27 +1,30 @@
-# Maskfix Submission Pipeline
+# Final Submission Pipeline
 
 ## Current Bundle
 
-- Configs: `configs/h200_maskfix_stage1_strategy_e_folds/h200_maskfix_stage1_strategy_e_fold*.yaml`
-- Checkpoint: `best_postprocess.pt`
-- Ensemble: 5-fold arithmetic mean of segmentation probabilities and classification probabilities.
-- Postprocess:
-  - `mask_thresholds: [0.25, 0.25, 0.25]`
-  - `cls_thresholds: [0.70, 0.80, 0.20]`
-  - `min_area: [48, 48, 48]`
-  - `z_min_run: [2, 3, 1]`
-  - `min_volume: [512, 512, 0]`
-  - `keep_largest_component: [false, false, true]`
+Final submission uses a two-family weighted probability ensemble:
+
+| Family | Config Glob | Checkpoint | Weight |
+| --- | --- | --- | ---: |
+| Strategy E | `configs/h200_maskfix_stage1_strategy_e_folds/h200_maskfix_stage1_strategy_e_fold*.yaml` | `best_postprocess.pt` | 0.30 |
+| B5 | `configs/h200_next_unetpp_b5_folds/h200_next_unetpp_b5_fold*.yaml` | `best_postprocess.pt` | 0.70 |
+
+Postprocess parameters come from the B5 fold configs.
 
 ## Command
 
 ```bash
-/mnt/disk2/hjj/uwgiseg/bin/python scripts/make_submission.py \
-  --fold-config-glob 'configs/h200_maskfix_stage1_strategy_e_folds/h200_maskfix_stage1_strategy_e_fold*.yaml' \
-  --checkpoint-name best_postprocess.pt \
+/mnt/disk2/hjj/uwgiseg/bin/python scripts/make_ensemble_submission.py \
+  --model-a-glob 'configs/h200_maskfix_stage1_strategy_e_folds/h200_maskfix_stage1_strategy_e_fold*.yaml' \
+  --model-b-glob 'configs/h200_next_unetpp_b5_folds/h200_next_unetpp_b5_fold*.yaml' \
+  --model-a-checkpoint best_postprocess.pt \
+  --model-b-checkpoint best_postprocess.pt \
+  --weight-a 0.3 \
+  --weight-b 0.7 \
+  --postprocess-source b \
   --sample-submission data/raw/uw-madison-gi-tract-image-segmentation/sample_submission.csv \
   --data-root data/raw/uw-madison-gi-tract-image-segmentation \
-  --out outputs/maskfix_submissions/maskfix_strategy_e_submission.csv
+  --out outputs/final_submissions/strategy_e_b5_030_070_submission.csv
 ```
 
 The script writes a companion manifest next to the CSV.
@@ -29,22 +32,35 @@ The script writes a companion manifest next to the CSV.
 ## Local Dataset Note
 
 The downloaded Kaggle data has an empty `sample_submission.csv`, because test
-images are hidden. On this machine the command writes a valid empty CSV and
+images are hidden. On this machine the command writes a valid empty CSV and a
 manifest with `status=empty_sample_submission`.
 
-For a real Kaggle submission, run the same command in an environment where the
-hidden test `sample_submission.csv` and `test/` images are available.
+For a real Kaggle submission, run the same command where the hidden test
+`sample_submission.csv` and `test/` images are available.
 
-## Validation Done
+## Validation Evidence
 
-- `python -m compileall -q src scripts app_streamlit.py`
-- Empty local sample path:
-  - output: `outputs/maskfix_submissions/maskfix_strategy_e_submission.csv`
-  - manifest: `outputs/maskfix_submissions/maskfix_strategy_e_submission.manifest.json`
-- Local train-format smoke inference:
-  - output: `outputs/maskfix_submissions/local_train_sample_maskfix_strategy_e_submission.csv`
-  - manifest: `outputs/maskfix_submissions/local_train_sample_maskfix_strategy_e_submission.manifest.json`
+Final weight search:
 
-The local train-format check verifies model loading, 5-fold ensemble inference,
-postprocess application, resizing, and RLE CSV writing. It does not provide a
-leaderboard score.
+```text
+outputs/ensemble_strategy_e_b5/strategy_e_b5_weight_search.json
+```
+
+Best local OOF result:
+
+| Strategy E Weight | B5 Weight | Mean Dice | Positive Dice | Empty FP Rate |
+| ---: | ---: | ---: | ---: | ---: |
+| 0.30 | 0.70 | 0.9226132123 | 0.7754965725 | 0.0159891921 |
+
+Official proxy artifacts:
+
+```text
+outputs/maskfix_oof/maskfix_strategy_e_official_oof_proxy.json
+outputs/h200_next_unetpp_b5_oof/h200_next_unetpp_b5_official_oof_proxy.json
+```
+
+## Legacy Single-Family Submission
+
+`scripts/make_submission.py` is still useful for single-family smoke tests or
+ablation submissions. It should not be used for the final selected submission,
+because it cannot blend B5 with Strategy E.
