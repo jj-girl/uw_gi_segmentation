@@ -26,9 +26,9 @@ from src.uwgi.utils import get_device, load_yaml
 
 DATA_ROOT = ROOT / "data/raw/uw-madison-gi-tract-image-segmentation"
 DEFAULT_PRESETS = {
-    "Dual-model ensemble": {
+    "Dual-branch fusion": {
         "kind": "ensemble",
-        "model_a_name": "Strategy E",
+        "model_a_name": "B3 auxiliary",
         "model_a_glob": "configs/h200_maskfix_stage1_strategy_e_folds/h200_maskfix_stage1_strategy_e_fold*.yaml",
         "model_a_checkpoint": "best_postprocess.pt",
         "model_a_weight": 0.3,
@@ -47,7 +47,7 @@ DEFAULT_PRESETS = {
         "report": "outputs/h200_next_unetpp_b5_oof/h200_next_unetpp_b5_auto_report.md",
         "oof_json": "outputs/h200_next_unetpp_b5_oof/h200_stage1_eval_config_component_postprocess.json",
     },
-    "Strategy E auxiliary 5-fold": {
+    "B3 auxiliary 5-fold": {
         "kind": "single",
         "glob": "configs/h200_maskfix_stage1_strategy_e_folds/h200_maskfix_stage1_strategy_e_fold*.yaml",
         "checkpoint": "best_postprocess.pt",
@@ -555,7 +555,7 @@ def render_oof_panel(preset: dict) -> None:
         summary = best.get("summary", {}).get("summary", {})
         classes = best.get("summary", {}).get("classes", {})
         st.caption(
-            f"Best weights: Strategy E {best.get('weight_a', 0):.3f}, "
+            f"Best weights: B3 auxiliary {best.get('weight_a', 0):.3f}, "
             f"B5 {best.get('weight_b', 0):.3f}"
         )
     else:
